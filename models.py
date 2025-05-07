@@ -1,5 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from marshmallow import Schema, fields
 
 db = SQLAlchemy()
 
@@ -37,3 +38,19 @@ class Consultation(db.Model):
     observation = db.Column(db.Text)
     treatment_plan = db.Column(db.Text)
     follow_up_reminder = db.Column(db.String(255))
+
+class PatientSchema(Schema):
+    id = fields.Int()
+    user_id = fields.Int()
+    name = fields.Str()
+    gender = fields.Str()
+    dob = fields.Date()
+    address = fields.Str()
+    phone = fields.Str()
+    email = fields.Str()
+    billing_address = fields.Str()
+    health_history = fields.Str()
+    allergies = fields.Str()
+    medications = fields.Str()
+    chronic_diseases = fields.Str()
+    financial_support = fields.Bool()
