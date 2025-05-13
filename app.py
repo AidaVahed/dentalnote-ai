@@ -1,23 +1,20 @@
 from flask import Flask, request, jsonify
-from models import db, Patient, PatientSchema
-from marshmallow import Schema, fields
-from config import Config
+from flask_migrate import Migrate
+from models import db, Patient, PatientSchema, Consultation
 from datetime import datetime
 import os
+import openai
+from config import Config
 from dotenv import load_dotenv
-
-
 
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-print(f'OpenAI API Key: {OPENAI_API_KEY}')
-
-
 app = Flask(__name__)
 app.config.from_object(Config)
 db.init_app(app)
+migrate = Migrate(app, db)
 
 with app.app_context():
     db.create_all()
@@ -28,7 +25,6 @@ def index():
 
 @app.route('/patients', methods=['POST'])
 def create_patient():
-    print("POST /patients route hit!")
     data = request.get_json()
 
     try:
@@ -51,8 +47,6 @@ def create_patient():
         db.session.commit()
 
         return jsonify({'message': 'Patient created', 'patient_id': new_patient.id}), 201
-
-
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -101,9 +95,7 @@ def get_patient(id):
     else:
         return jsonify({'message': 'Patient not found'}), 404
 
-
 patient_schema = PatientSchema()
-
 
 @app.route('/patients/<int:id>', methods=['PUT'])
 def update_patient(id):
@@ -137,6 +129,52 @@ def update_patient(id):
     db.session.commit()
 
     return jsonify({'message': 'Patient updated successfully', 'patient': patient_schema.dump(patient)}), 200
+
+@app.route('/patients/<int:id>', methods=['DELETE'])
+def delete_patient(id):
+    patient = db.session.get(Patient, id)
+    if not patient:
+        return jsonify({'message': 'Patient not found'}), 404
+
+    db.session.delete(patient)
+    db.session.commit()
+
+    return jsonify({'message': 'Patient deleted successfully'}), 200
+
+
+@app.route('/generate_observation', methods=['POST'])
+def generate_observation():
+    data = request.get_json()
+
+    patient_id = data.get('patient_id')
+    patient = Patient.query.get(patient_id)
+
+    if not patient:
+        return jsonify({'message': 'Patient not found'}), 404
+
+    observation_prompt = f"Generate an observation for a patient with the following health data: {patient.health_history}"
+
+    openai.api_key = OPENAI_API_KEY
+
+    try:
+        response = openai.completions.create(
+            model="gpt-3.5-turbo",
+            prompt=observation_prompt,
+            max_tokens=150
+        )
+        observation = response['choices'][0]['text'].strip()
+
+        consultation = Consultation(
+            patient_id=patient.id,
+            observation=observation
+        )
+        db.session.add(consultation)
+        db.session.commit()
+
+        return jsonify({'message': 'Observation generated', 'observation': observation}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
