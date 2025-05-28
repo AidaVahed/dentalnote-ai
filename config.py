@@ -1,7 +1,6 @@
 import os
 
-basedir = os.path.abspath(os.path.dirname(__file__))
-
 class Config:
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(basedir, 'database.db')
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'devsecretkey')
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///dentalnote.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
