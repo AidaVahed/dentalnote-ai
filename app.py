@@ -20,6 +20,7 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 openai.api_key = OPENAI_API_KEY
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -118,6 +119,10 @@ def generate_observation():
     if not patient:
         return jsonify({'message': 'Patient not found'}), 404
 
+
+    if not patient.health_history:
+        return jsonify({'error': 'health_history is missing for this patient'}), 400
+
     prompt = (
         f"Du bist ein Zahnarzt. Analysiere die folgende Patienten-Historie und "
         f"erstelle eine strukturierte Beobachtung als JSON mit Feldern:\n"
@@ -131,7 +136,7 @@ def generate_observation():
     )
 
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Du bist ein hilfreicher Zahnarzt-Assistent."},
@@ -191,13 +196,14 @@ def upload_pdf_and_generate_observation():
             f"}}"
         )
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=400,
+            temperature=0.5
 
         )
         observation_text = response.choices[0].message.content.strip()
