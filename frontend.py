@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-API_URL = "http://localhost:5000"
+API_URL = "http://localhost:8000"
 
 st.title("Patientenverwaltung")
 
@@ -22,6 +22,12 @@ with st.form("create_patient"):
     address = st.text_input("Adresse")
     phone = st.text_input("Telefon")
     email = st.text_input("E-Mail")
+    billing_address = st.text_input("Rechnungsadresse (optional)")
+    health_history = st.text_area("Krankengeschichte (optional)")
+    allergies = st.text_input("Allergien (optional)")
+    medications = st.text_input("Medikamente (optional)")
+    chronic_diseases = st.text_input("Chronische Erkrankungen (optional)")
+    financial_support = st.checkbox("Finanzielle Unterstützung")
     user_id = st.number_input("User-ID", min_value=1, step=1)
     submitted = st.form_submit_button("Anlegen")
     if submitted:
@@ -32,8 +38,15 @@ with st.form("create_patient"):
             "dob": dob.strftime("%Y-%m-%d"),
             "address": address,
             "phone": phone,
-            "email": email
+            "email": email,
+            "billing_address": billing_address,
+            "health_history": health_history,
+            "allergies": allergies,
+            "medications": medications,
+            "chronic_diseases": chronic_diseases,
+            "financial_support": financial_support
         }
+
         resp = requests.post(f"{API_URL}/patients", json=data)
         if resp.status_code == 201:
             st.success("Patient erfolgreich angelegt!")

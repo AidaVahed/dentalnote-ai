@@ -145,7 +145,7 @@ def generate_observation():
             max_tokens=300,
             temperature=0.5
         )
-        text = response['choices'][0]['message']['content'].strip()
+        text = response.choices[0].message.content.strip()
 
         consultation = Consultation(
             patient_id=patient.id,
