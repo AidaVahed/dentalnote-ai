@@ -1,9 +1,10 @@
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-*.db
 instance/
 .env
 venv/
-.env.*
+.docker/
+*.log
+.vscode/
+.idea/
+dentalnote.db

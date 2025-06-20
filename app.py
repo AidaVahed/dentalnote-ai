@@ -9,21 +9,16 @@ from dotenv import load_dotenv
 import fitz
 from flask_cors import CORS
 import logging
-
-app = Flask(__name__)
-CORS(app)
-
-logging.basicConfig(level=logging.DEBUG)
+import json
 
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-openai.api_key = OPENAI_API_KEY
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
 app = Flask(__name__)
 app.config.from_object(Config)
+CORS(app)
+logging.basicConfig(level=logging.DEBUG)
+
 
 db.init_app(app)
 migrate = Migrate(app, db)
@@ -31,13 +26,30 @@ migrate = Migrate(app, db)
 with app.app_context():
     db.create_all()
 
+
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+openai.api_key = OPENAI_API_KEY
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+# Hilfsfunktion für Input-Validierung
+def validate_json(required_fields, data):
+    if not data:
+        return False, "JSON Body fehlt"
+    for field in required_fields:
+        if field not in data:
+            return False, f"Feld '{field}' fehlt im JSON Body"
+    return True, ""
+
 @app.route('/')
 def index():
-    return 'Database initialized!'
+    return 'Datenbank initialisiert!'
 
 @app.route('/patients', methods=['POST'])
 def create_patient():
     data = request.get_json()
+    valid, msg = validate_json(['user_id', 'name', 'gender', 'dob', 'address', 'phone', 'email'], data)
+    if not valid:
+        return jsonify({'error': msg}), 400
     try:
         new_patient = Patient(
             user_id=data['user_id'],
@@ -56,7 +68,7 @@ def create_patient():
         )
         db.session.add(new_patient)
         db.session.commit()
-        return jsonify({'message': 'Patient created', 'patient_id': new_patient.id}), 201
+        return jsonify({'message': 'Patient erstellt', 'patient_id': new_patient.id}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -70,7 +82,7 @@ def get_patients():
 def get_patient(id):
     patient = Patient.query.get(id)
     if not patient:
-        return jsonify({'message': 'Patient not found'}), 404
+        return jsonify({'message': 'Patient nicht gefunden'}), 404
     patient_schema = PatientSchema()
     return jsonify(patient_schema.dump(patient)), 200
 
@@ -78,14 +90,15 @@ def get_patient(id):
 def update_patient(id):
     patient = Patient.query.get(id)
     if not patient:
-        return jsonify({'message': 'Patient not found'}), 404
+        return jsonify({'message': 'Patient nicht gefunden'}), 404
     data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Kein JSON Body erhalten'}), 400
     try:
+        if 'dob' in data:
+            patient.dob = datetime.strptime(data['dob'], '%Y-%m-%d').date()
         patient.name = data.get('name', patient.name)
         patient.gender = data.get('gender', patient.gender)
-        dob = data.get('dob')
-        if dob:
-            patient.dob = datetime.strptime(dob, '%Y-%m-%d').date()
         patient.address = data.get('address', patient.address)
         patient.phone = data.get('phone', patient.phone)
         patient.email = data.get('email', patient.email)
@@ -97,7 +110,7 @@ def update_patient(id):
         patient.financial_support = data.get('financial_support', patient.financial_support)
         db.session.commit()
         patient_schema = PatientSchema()
-        return jsonify({'message': 'Patient updated', 'patient': patient_schema.dump(patient)}), 200
+        return jsonify({'message': 'Patient aktualisiert', 'patient': patient_schema.dump(patient)}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -105,31 +118,34 @@ def update_patient(id):
 def delete_patient(id):
     patient = Patient.query.get(id)
     if not patient:
-        return jsonify({'message': 'Patient not found'}), 404
+        return jsonify({'message': 'Patient nicht gefunden'}), 404
     db.session.delete(patient)
     db.session.commit()
-    return jsonify({'message': 'Patient deleted'}), 200
+    return jsonify({'message': 'Patient gelöscht'}), 200
 
 
 @app.route('/generate_observation', methods=['POST'])
 def generate_observation():
     data = request.get_json()
+    valid, msg = validate_json(['patient_id'], data)
+    if not valid:
+        return jsonify({'error': msg}), 400
+
     patient_id = data.get('patient_id')
     patient = Patient.query.get(patient_id)
     if not patient:
-        return jsonify({'message': 'Patient not found'}), 404
-
+        return jsonify({'message': 'Patient nicht gefunden'}), 404
 
     if not patient.health_history:
-        return jsonify({'error': 'health_history is missing for this patient'}), 400
+        return jsonify({'error': 'health_history fehlt für diesen Patienten'}), 400
 
     prompt = (
         f"Du bist ein Zahnarzt. Analysiere die folgende Patienten-Historie und "
         f"erstelle eine strukturierte Beobachtung als JSON mit Feldern:\n"
         f"{{\n"
-        f"  'observation': string,\n"
-        f"  'affected_teeth': [string],\n"
-        f"  'recommendation': string\n"
+        f"  \"observation\": string,\n"
+        f"  \"affected_teeth\": [string],\n"
+        f"  \"recommendation\": string\n"
         f"}}\n\n"
         f"Patienten-Historie:\n{patient.health_history}\n\n"
         f"Antwort nur im JSON-Format."
@@ -142,10 +158,16 @@ def generate_observation():
                 {"role": "system", "content": "Du bist ein hilfreicher Zahnarzt-Assistent."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=300,
+            max_tokens=400,
             temperature=0.5
         )
         text = response.choices[0].message.content.strip()
+
+
+        try:
+            observation_json = json.loads(text)
+        except json.JSONDecodeError:
+            return jsonify({'error': 'Antwort war kein gültiges JSON', 'raw_response': text}), 500
 
         consultation = Consultation(
             patient_id=patient.id,
@@ -155,27 +177,28 @@ def generate_observation():
         db.session.add(consultation)
         db.session.commit()
 
-        return jsonify({'message': 'Observation generated', 'observation': text}), 200
+        return jsonify({'message': 'Observation generiert', 'observation': observation_json}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
+
 @app.route('/upload_pdf_and_generate_observation', methods=['POST'])
 def upload_pdf_and_generate_observation():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    file = request.files['file']
+    if 'pdf_file' not in request.files:
+        return jsonify({'error': 'Keine Datei übermittelt'}), 400
+    file = request.files['pdf_file']
     if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
+        return jsonify({'error': 'Keine Datei ausgewählt'}), 400
     if not file.filename.lower().endswith('.pdf'):
-        return jsonify({'error': 'Only PDF files are allowed'}), 400
+        return jsonify({'error': 'Nur PDF-Dateien sind erlaubt'}), 400
 
     patient_id = request.form.get('patient_id')
     if not patient_id:
-        return jsonify({'error': 'patient_id is required'}), 400
+        return jsonify({'error': 'patient_id wird benötigt'}), 400
     patient = Patient.query.get(patient_id)
     if not patient:
-        return jsonify({'error': 'Patient not found'}), 404
+        return jsonify({'error': 'Patient nicht gefunden'}), 404
 
     try:
         doc = fitz.open(stream=file.read(), filetype="pdf")
@@ -186,41 +209,47 @@ def upload_pdf_and_generate_observation():
         prompt = (
             f"Du bist ein Zahnarzt. Hier ist das Transkript eines Patientenberichts:\n"
             f"{text}\n\n"
-            f"Erstelle bitte eine gut formulierte Beobachtung in korrektem Deutsch, "
-            f"die zahnärztliche Befunde wie z.B. Karies an Zahn A2 oder Implantate erwähnt. "
-            f"Formatiere die Antwort als JSON mit Feldern:\n"
+            f"Bitte generiere folgende strukturierte JSON-Antwort:\n"
             f"{{\n"
-            f"  'observation': string,\n"
-            f"  'affected_teeth': [string],\n"
-            f"  'recommendation': string\n"
-            f"}}"
+            f"  \"observation\": \"string\",\n"
+            f"  \"affected_teeth\": [\"string\"],\n"
+            f"  \"recommendation\": \"string\"\n"
+            f"}}\n"
+            f"Antwort NUR als JSON zurückgeben, ohne Kommentare."
         )
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "Du bist ein hilfreicher Assistent."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=400,
+            max_tokens=500,
             temperature=0.5
-
         )
-        observation_text = response.choices[0].message.content.strip()
+
+        raw_text = response.choices[0].message.content.strip()
+
+        try:
+            observation_data = json.loads(raw_text)
+        except json.JSONDecodeError:
+            return jsonify({'error': 'Antwort war kein gültiges JSON', 'raw_response': raw_text}), 500
 
         consultation = Consultation(
             patient_id=patient.id,
-            observation=observation_text,
+            observation=raw_text,
             date=datetime.utcnow()
         )
         db.session.add(consultation)
         db.session.commit()
 
-        return jsonify({'message': 'Observation generated from PDF', 'observation': observation_text}), 200
+        return jsonify({
+            'message': 'Observation aus PDF generiert',
+            'observation': observation_data
+        }), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
 if __name__ == '__main__':
-    app.run(port=8000, debug=True)
+    app.run(host='0.0.0.0', port=8000, debug=True)

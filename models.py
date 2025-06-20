@@ -1,6 +1,9 @@
 from flask_sqlalchemy import SQLAlchemy
 from marshmallow_sqlalchemy import SQLAlchemyAutoSchema
+from marshmallow import fields
 from datetime import datetime
+
+
 
 db = SQLAlchemy()
 
@@ -30,10 +33,11 @@ class Consultation(db.Model):
 
 
 class PatientSchema(SQLAlchemyAutoSchema):
+    consultations = fields.Nested('ConsultationSchema', many=True)
+
     class Meta:
         model = Patient
         load_instance = True
-        include_relationships = True
 
 class ConsultationSchema(SQLAlchemyAutoSchema):
     class Meta:
